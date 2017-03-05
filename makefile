@@ -1,10 +1,10 @@
 
-all: server clinet
+all: server client
 
 server: server.o tools.o
 	gcc -o $@ $^ -pthread
 
-clinet: client.o tools.o
+client: client.o tools.o
 	gcc -o $@ $^ -pthread
 
 %.o : %.c packets.h

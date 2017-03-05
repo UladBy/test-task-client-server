@@ -35,43 +35,29 @@ typedef struct server_context_s {
 } server_context_t;
 
 static int server_resive(client_t *client);
-void* cleaner(void *data);
+static void* cleaner(void *data);
 
 
 static int server_broadcast_message(server_context_t *ctx,
                                     const char message[],
                                     const char client_name[])
 {
-    char *name_buf;
-    char *message_buf;
-    int name_buf_len;
-    int message_buf_len;
-
     int ret;
     client_t *client;
-
-    message_buf_len = build_string(message, &message_buf);
-    if (message_buf_len < 0) {
-        return -1;
-    }
 
     pthread_mutex_lock(&ctx->list_lock);
     client = ctx->clients_list.lh_first;
     while (client != NULL) {
-        name_buf_len = build_string(client_name, &name_buf);
-        if (name_buf_len < 0) {
-            return -1;
-        }
+        ret = send_packet_type(client->sock, MESSAGE);
+        if (ret < 0) break;
+        ret = send_string(client->sock, client_name);
+        if (ret < 0) break;
+        ret = send_string(client->sock, message);
+        if (ret < 0) break;
 
-        ret = send_packet(client->sock, MESSAGE, name_buf, name_buf_len);
-        write(client->sock, message_buf, message_buf_len);
-
-        free(name_buf);
         client = client->node.le_next;
     }
     pthread_mutex_unlock(&ctx->list_lock);
-
-    free(message_buf);
 
     return ret;
 
@@ -88,6 +74,7 @@ static void* server_listener(void *data)
         ret = server_resive(client);
     }
 }
+
 
 static int connect_client(int sock, server_context_t *ctx)
 {
@@ -133,7 +120,7 @@ static int connect_client(int sock, server_context_t *ctx)
 }
 
 
-void print_client(client_t *client)
+static void print_client(client_t *client)
 {
     printf("name: %s\n", client->name);
     printf("live_counter: %i\n", client->live_counter);
@@ -141,23 +128,22 @@ void print_client(client_t *client)
 
 void print_all_clients(server_context_t *ctx)
 {
-    struct _client *client;
+    client_t *client;
 
     pthread_mutex_lock(&ctx->list_lock);
     client = ctx->clients_list.lh_first;
     while (client != NULL) {
-        print_client(client);
         client = client->node.le_next;
     }
     pthread_mutex_unlock(&ctx->list_lock);
 }
 
-int process_ping(client_t *client)
+static int process_ping(client_t *client)
 {
     return 0;
 }
 
-int process_stat(client_t *client)
+static int process_stat(client_t *client)
 {
     char *id;
     char *file_name;
@@ -226,7 +212,6 @@ static int server_resive(client_t *client)
     switch (packet_type) {
     case MESSAGE:
         message = read_string(client->sock);
-
         printf("message: %s from %s\n", message, client->name);
         server_broadcast_message(client->context, message, client->name);
         free(message);
@@ -243,10 +228,12 @@ static int server_resive(client_t *client)
                 __FILE__, __FUNCTION__, __LINE__);
 
         }
+
+    return ret;
 }
 
 
-void* cleaner(void *data)
+static void* cleaner(void *data)
 {
     client_t *client = (client_t*) data;
     server_context_t *ctx = client->context;
@@ -276,7 +263,7 @@ void* cleaner(void *data)
     free(client);
 }
 
-int server_context_init(server_context_t *ctx)
+static int server_context_init(server_context_t *ctx)
 {
     LIST_INIT(&ctx->clients_list);
     pthread_mutex_init(&ctx->list_lock, NULL);

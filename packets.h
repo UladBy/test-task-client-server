@@ -14,8 +14,6 @@ enum {
     SETSTAT
 } packet_type_t;
 
-int build_string(const char string[], char **buf);
-int send_packet(int sock, unsigned packet_type, char *data, int data_len);
 char* read_string(int sock);
 int read_unsigned(int sock, unsigned *data);
 int send_packet_type(int sock, unsigned packet_type);

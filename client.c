@@ -28,16 +28,11 @@ typedef struct {
 
 static int client_connect(int sock, const char name[])
 {
-    char *buf;
-    char buf_len;
     int ret;
 
-    buf_len = build_string(name, &buf);
-    if (buf_len < 0) {
-        return -1;
-    }
-    ret = send_packet(sock, CONNECT, buf, buf_len);
-    free(buf);
+    ret = send_packet_type(sock, CONNECT);
+    if (ret < 0) return -1;
+    ret = send_string(sock, name);
 
     return ret;
 }
@@ -45,16 +40,11 @@ static int client_connect(int sock, const char name[])
 
 static int client_send_message(int sock, const char message[])
 {
-    char *buf;
-    char buf_len;
     int ret;
 
-    buf_len = build_string(message, &buf);
-    if (buf_len < 0) {
-        return -1;
-    }
-    ret = send_packet(sock, MESSAGE, buf, buf_len);
-    free(buf);
+    ret = send_packet_type(sock, MESSAGE);
+    if (ret < 0) return -1;
+    ret = send_string(sock, message);
 
     return ret;
 }
@@ -67,7 +57,7 @@ static void* pinger(void *data)
 
     while (ret >= 0 && ctx->is_runing) {
         sleep(PING_PERIOD);
-        ret = send_packet(ctx->sock, PING, NULL, 0);
+        ret = send_packet_type(ctx->sock, PING);
         ctx->ping_counter++;
     }
 }
@@ -104,9 +94,8 @@ int send_stat(client_context_t *ctx, const char id[])
     ret = send_unsigned(ctx->sock, ctx->message_symbols_resived);
     if (ret < 0) return -1;
     ret = send_unsigned(ctx->sock, ctx->message_symbols_send);
-    if (ret < 0) return -1;
 
-    return 0;
+    return ret;
 }
 
 
@@ -124,7 +113,9 @@ static int client_resive(client_context_t *ctx)
     switch (packet_type) {
     case MESSAGE:
         name = read_string(ctx->sock);
+        if (name == NULL) return -1;
         message = read_string(ctx->sock);
+        if (message == NULL) return -1;
         printf("client %s send message: %s\n", name, message);
         ctx->message_symbols_resived += strlen(message);
         free(message);
@@ -132,7 +123,10 @@ static int client_resive(client_context_t *ctx)
         break;
     case GETSTAT:
         name = read_string(ctx->sock);
+        if (name == NULL) return -1;
         ret = send_stat(ctx, name);
+        free(name);
+        if (ret < 0) return -1;
         break;
     default:
         fprintf(stderr, "[%s:%s:%i]unkown or forbiden packet_type\n",
@@ -147,7 +141,7 @@ static void* client_listener(void *data)
     client_context_t *ctx = (client_context_t*)data;
     int ret = 0;
 
-    while (ret >= 0) {
+    while (ret >= 0 && ctx->is_runing) {
         ret = client_resive(ctx);
     }
 
@@ -194,7 +188,7 @@ int main(int argc, char *argv[])
     pthread_create(&context.pinger_thread, NULL, pinger, &context);
     pthread_create(&context.listener_thread, NULL, client_listener, &context);
 
-    while (1) {
+    while (context.is_runing) {
         char message_text[50];
         scanf("%49s", message_text);
         client_send_message(context.sock, message_text);

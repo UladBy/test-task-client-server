@@ -6,37 +6,15 @@
 
 #include "packets.h"
 
-int build_string(const char string[], char **buf)
-{
-    unsigned len = strlen(string);
-    unsigned buf_len = len + 4;
-
-    *buf = malloc(buf_len);
-    if (*buf == NULL) {
-        fprintf(stderr, "[%s:%s:%i]allocation error\n",
-                __FILE__, __FUNCTION__, __LINE__);
-        return -1;
-    }
-    *((unsigned *)(*buf)) = len;
-    strcpy((*buf)+4, string);
-    return buf_len;
-}
-
-
-int send_packet(int sock, unsigned packet_type, char *data, int data_len)
-{
-    write(sock, &packet_type, PACKET_UNSIGNED_SIZE);
-    if (data != NULL) {
-        write(sock, data, data_len);
-    }
-
-    return 0;
-}
-
 
 int send_unsigned(int sock, unsigned value)
 {
-    return write(sock, &value, PACKET_UNSIGNED_SIZE);
+    int ret = write(sock, &value, PACKET_UNSIGNED_SIZE);
+    if (ret < 0) {
+        fprintf(stderr, "[%s:%s:%i]write error\n",
+                __FILE__, __FUNCTION__, __LINE__);
+    }
+    return ret;
 }
 
 
@@ -51,8 +29,13 @@ int send_string(int sock, const char string[])
     unsigned len = strlen(string);
     int ret;
 
-    send_unsigned(sock, len);
-    write(sock, string, len);
+    ret = send_unsigned(sock, len);
+    if (ret < 0) return -1;
+    ret = write(sock, string, len);
+    if (ret < 0) {
+        fprintf(stderr, "[%s:%s:%i]write error\n",
+                __FILE__, __FUNCTION__, __LINE__);
+    }
 
     return ret;
 }
@@ -88,6 +71,7 @@ char* read_string(int sock)
     return string;
 }
 
+
 int read_unsigned(int sock, unsigned *data)
 {
     int read_size;
@@ -98,8 +82,8 @@ int read_unsigned(int sock, unsigned *data)
                 __FILE__, __FUNCTION__, __LINE__);
         return -1;
     } else if (read_size < PACKET_UNSIGNED_SIZE) {
-        fprintf(stderr, "[%s:%s:%i]data too small %i\n",
-                __FILE__, __FUNCTION__, __LINE__, read_size);
+        fprintf(stderr, "[%s:%s:%i]data too small\n",
+                __FILE__, __FUNCTION__, __LINE__);
 
         return -1;
     }

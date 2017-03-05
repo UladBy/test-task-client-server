@@ -21,7 +21,8 @@ typedef struct _client {
     int sock;
     int live_counter;
     char *name;
-    pthread_t thread;
+    pthread_t listener_thread;
+    pthread_t cleaner_thread;
     struct server_context_s *context;
 } client_t;
 
@@ -34,6 +35,8 @@ typedef struct server_context_s {
 } server_context_t;
 
 static int server_resive(client_t *client);
+void* cleaner(void *data);
+
 
 static int server_broadcast_message(server_context_t *ctx,
                                     const char message[],
@@ -73,6 +76,7 @@ static int server_broadcast_message(server_context_t *ctx,
     return ret;
 
 }
+
 
 static void* server_listener(void *data)
 {
@@ -122,7 +126,8 @@ static int connect_client(int sock, server_context_t *ctx)
     LIST_INSERT_HEAD(&ctx->clients_list, client, node);
     pthread_mutex_unlock(&ctx->list_lock);
 
-    pthread_create(&client->thread, NULL, server_listener, client);
+    pthread_create(&client->listener_thread, NULL, server_listener, client);
+    pthread_create(&client->cleaner_thread, NULL, cleaner, client);
 
     return 0;
 }
@@ -149,9 +154,62 @@ void print_all_clients(server_context_t *ctx)
 
 int process_ping(client_t *client)
 {
-    fprintf(stderr, "[%s:%s:%i]%s PING \n", __FILE__, __FUNCTION__, __LINE__, client->name);
-    client->live_counter = 0;
     return 0;
+}
+
+int process_stat(client_t *client)
+{
+    char *id;
+    char *file_name;
+    int ret;
+    FILE *logfd;
+
+    unsigned ping_counter;
+    unsigned setstat_counter;
+    unsigned message_counter;
+    unsigned message_symbols_resived;
+    unsigned message_symbols_send;
+    int id_len;
+    time_t itime;
+    char *str_time;
+
+    id = read_string(client->sock);
+    if (id == NULL) return -1;
+    ret = read_unsigned(client->sock, &ping_counter);
+    if (ret < 0) goto end;
+    ret = read_unsigned(client->sock, &setstat_counter);
+    if (ret < 0) goto end;
+    ret = read_unsigned(client->sock, &message_counter);
+    if (ret < 0) goto end;
+    ret = read_unsigned(client->sock, &message_symbols_resived);
+    if (ret < 0) goto end;
+    ret = read_unsigned(client->sock, &message_symbols_send);
+    if (ret < 0) goto end;
+
+    id_len = strlen(id);
+    file_name = calloc(id_len + 7, 1);
+    if (file_name == NULL) goto end;
+    strcpy(file_name, id);
+    strcpy(file_name+id_len, ".log");
+
+    logfd = fopen(file_name, "a");
+    itime = time(NULL);
+    str_time = ctime(&itime);
+    str_time[strlen(str_time)-1] = '\0';
+    //delete end of string
+
+    fprintf(logfd, "[%s] %s: ping %u, message %u, setstat %u, "
+            "message symbols resived %u,"
+            "message_symbols_send %u\n",
+            str_time,
+            client->name,
+            ping_counter, message_counter, setstat_counter,
+            message_symbols_resived, message_symbols_send);
+    fclose(logfd);
+
+ end:
+    free(id);
+    return ret;
 }
 
 static int server_resive(client_t *client)
@@ -164,50 +222,58 @@ static int server_resive(client_t *client)
     if (ret < 0) {
         return -1;
     }
+    client->live_counter = 0;
     switch (packet_type) {
     case MESSAGE:
         message = read_string(client->sock);
-        client->live_counter = 0;
+
         printf("message: %s from %s\n", message, client->name);
         server_broadcast_message(client->context, message, client->name);
         free(message);
         break;
-    /* case SETSTAT: */
-    /*     ret = recive_stat(sock); */
-    /*     break; */
+    case SETSTAT:
+        ret = process_stat(client);
+        break;
     case PING:
         ret = process_ping(client);
         break;
-        
+
     default:
         fprintf(stderr, "[%s:%s:%i]unkown or forbiden packet_type\n",
                 __FILE__, __FUNCTION__, __LINE__);
-        
+
         }
 }
 
 
 void* cleaner(void *data)
 {
-    server_context_t *ctx = (server_context_t*)data;
-    client_t *client; 
-    while (1) {
+    client_t *client = (client_t*) data;
+    server_context_t *ctx = client->context;
+    int ret;
+
+    while (client->live_counter < 6) {
         sleep(1);
-        pthread_mutex_lock(&ctx->list_lock);
-        client = ctx->clients_list.lh_first;
-        while (client != NULL) {
-            if (client->live_counter < 6) {
-                client->live_counter++;
-            } else {
-                pthread_kill(client->thread, 15);
-                close(client->sock);
-                LIST_REMOVE(client, node);
-                free(client);
-            }
-            client = client->node.le_next;
-        }
-        pthread_mutex_unlock(&ctx->list_lock);
+        client->live_counter++;
     }
+
+    pthread_kill(client->listener_thread, 15);
+    close(client->sock);
+
+    pthread_mutex_lock(&ctx->list_lock);
+    LIST_REMOVE(client, node);
+    for(client_t *client_item = ctx->clients_list.lh_first;
+        client_item != NULL;
+        client_item = client_item->node.le_next) {
+
+        ret = send_packet_type(client_item->sock, GETSTAT);
+        if (ret < 0) continue;
+        send_string(client_item->sock, client->name);
+    }
+    pthread_mutex_unlock(&ctx->list_lock);
+
+    free(client->name);
+    free(client);
 }
 
 int server_context_init(server_context_t *ctx)
@@ -231,8 +297,7 @@ int main(int argc, char *argv[])
     pthread_t listener_thread;
 
     server_context_init(&context);
-    pthread_create(&cleanner_thread, NULL, cleaner, &context);
-    
+
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         printf("socket() failed: %d\n", errno);

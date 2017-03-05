@@ -10,3 +10,7 @@ clinet: client.o tools.o
 %.o : %.c packets.h
 	gcc -c $(CFLAGS) $< -o $@
 
+clean:
+	rm -f *.o server client
+
+.PHONY: clean all

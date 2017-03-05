@@ -22,6 +22,7 @@ int build_string(const char string[], char **buf)
     return buf_len;
 }
 
+
 int send_packet(int sock, unsigned packet_type, char *data, int data_len)
 {
     write(sock, &packet_type, PACKET_UNSIGNED_SIZE);
@@ -32,12 +33,37 @@ int send_packet(int sock, unsigned packet_type, char *data, int data_len)
     return 0;
 }
 
+
+int send_unsigned(int sock, unsigned value)
+{
+    return write(sock, &value, PACKET_UNSIGNED_SIZE);
+}
+
+
+int send_packet_type(int sock, unsigned packet_type)
+{
+    return send_unsigned(sock, packet_type);
+}
+
+
+int send_string(int sock, const char string[])
+{
+    unsigned len = strlen(string);
+    int ret;
+
+    send_unsigned(sock, len);
+    write(sock, string, len);
+
+    return ret;
+}
+
+
 char* read_string(int sock)
 {
     char *string = NULL;
     unsigned len;
     int ret;
-    
+
     ret = read_unsigned(sock, &len);
 
     string = calloc(len+1, sizeof(char));

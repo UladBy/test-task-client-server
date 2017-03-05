@@ -64,7 +64,7 @@ static void* pinger(void *data)
 {
     int ret = 0;
     client_context_t *ctx = (client_context_t*)data;
-    
+
     while (ret >= 0 && ctx->is_runing) {
         sleep(PING_PERIOD);
         ret = send_packet(ctx->sock, PING, NULL, 0);
@@ -77,8 +77,38 @@ static int client_context_init(client_context_t *context)
 {
     pthread_mutex_init(&context->socket_write_lock, NULL);
     context->is_runing = 1;
+
+    context->ping_counter = 0;
+    context->setstat_counter = 0;
+    context->message_counter = 0;
+    context->message_symbols_resived = 0;
+    context->message_symbols_send = 0;
+
     return 0;
 }
+
+int send_stat(client_context_t *ctx, const char id[])
+{
+    int ret;
+
+    ret = send_packet_type(ctx->sock, SETSTAT);
+    if (ret < 0) return -1;
+    ret = send_string(ctx->sock, id);
+    if (ret < 0) return -1;
+    ret = send_unsigned(ctx->sock, ctx->ping_counter);
+    if (ret < 0) return -1;
+    ret = send_unsigned(ctx->sock, ctx->setstat_counter);
+    if (ret < 0) return -1;
+    ret = send_unsigned(ctx->sock, ctx->message_counter);
+    if (ret < 0) return -1;
+    ret = send_unsigned(ctx->sock, ctx->message_symbols_resived);
+    if (ret < 0) return -1;
+    ret = send_unsigned(ctx->sock, ctx->message_symbols_send);
+    if (ret < 0) return -1;
+
+    return 0;
+}
+
 
 static int client_resive(client_context_t *ctx)
 {
@@ -101,7 +131,8 @@ static int client_resive(client_context_t *ctx)
         free(name);
         break;
     case GETSTAT:
-        ret = recive_stat(sock);
+        name = read_string(ctx->sock);
+        ret = send_stat(ctx, name);
         break;
     default:
         fprintf(stderr, "[%s:%s:%i]unkown or forbiden packet_type\n",
@@ -109,6 +140,7 @@ static int client_resive(client_context_t *ctx)
         }
     return 0;
 }
+
 
 static void* client_listener(void *data)
 {
@@ -127,7 +159,7 @@ int main(int argc, char *argv[])
     client_context_t context;
     struct sockaddr_in serv_addr;
     int ret;
-    
+
     if (argc < 3) {
         printf("usage:\n\t%s address name\n", argv[0]);
         return 1;
@@ -140,7 +172,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    memset(&serv_addr, '0', sizeof(serv_addr)); 
+    memset(&serv_addr, '0', sizeof(serv_addr));
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(5000);

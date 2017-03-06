@@ -81,6 +81,7 @@ static int connect_client(int sock, server_context_t *ctx)
     int packet_type;
     struct _client *client;
     int ret;
+    pthread_attr_t attr;
 
     ret = read_unsigned(sock, &packet_type);
     if (ret < 0) {
@@ -113,8 +114,10 @@ static int connect_client(int sock, server_context_t *ctx)
     LIST_INSERT_HEAD(&ctx->clients_list, client, node);
     pthread_mutex_unlock(&ctx->list_lock);
 
-    pthread_create(&client->listener_thread, NULL, server_listener, client);
-    pthread_create(&client->cleaner_thread, NULL, cleaner, client);
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&client->listener_thread, &attr, server_listener, client);
+    pthread_create(&client->cleaner_thread, &attr, cleaner, client);
 
     return 0;
 }

@@ -38,13 +38,15 @@ static int client_connect(int sock, const char name[])
 }
 
 
-static int client_send_message(int sock, const char message[])
+static int client_send_message(client_context_t *ctx, const char message[])
 {
     int ret;
 
-    ret = send_packet_type(sock, MESSAGE);
-    if (ret < 0) return -1;
-    ret = send_string(sock, message);
+    pthread_mutex_lock(&ctx->socket_write_lock);
+    ret = send_packet_type(ctx->sock, MESSAGE);
+    if (ret >= 0)
+        ret = send_string(ctx->sock, message);
+    pthread_mutex_unlock(&ctx->socket_write_lock);
 
     return ret;
 }
@@ -57,7 +59,11 @@ static void* pinger(void *data)
 
     while (ret >= 0 && ctx->is_runing) {
         sleep(PING_PERIOD);
+
+        pthread_mutex_lock(&ctx->socket_write_lock);
         ret = send_packet_type(ctx->sock, PING);
+        pthread_mutex_unlock(&ctx->socket_write_lock);
+
         ctx->ping_counter++;
     }
 }
@@ -81,19 +87,23 @@ int send_stat(client_context_t *ctx, const char id[])
 {
     int ret;
 
+    pthread_mutex_lock(&ctx->socket_write_lock);
     ret = send_packet_type(ctx->sock, SETSTAT);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_string(ctx->sock, id);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_unsigned(ctx->sock, ctx->ping_counter);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_unsigned(ctx->sock, ctx->setstat_counter);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_unsigned(ctx->sock, ctx->message_counter);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_unsigned(ctx->sock, ctx->message_symbols_resived);
-    if (ret < 0) return -1;
+    if (ret < 0) goto end;
     ret = send_unsigned(ctx->sock, ctx->message_symbols_send);
+
+ end:
+    pthread_mutex_unlock(&ctx->socket_write_lock);
 
     return ret;
 }
@@ -191,7 +201,7 @@ int main(int argc, char *argv[])
     while (context.is_runing) {
         char message_text[50];
         scanf("%49s", message_text);
-        client_send_message(context.sock, message_text);
+        client_send_message(&context, message_text);
         context.message_counter++;
         context.message_symbols_send += strlen(message_text);
     }
